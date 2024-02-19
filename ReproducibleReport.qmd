@@ -34,6 +34,7 @@ library(emmeans)
 library(tidybayes)
 library(modelr)
 library(ggdist)
+library(cmdstanr)
 
 
 
@@ -62,70 +63,14 @@ dag <-
   dagitty("dag {Param -> FreqPractice -> LearningOpportunities -> Performance
           Param -> LearningOpportunities}")
 coordinates(dag) <- 
-  list(x = c(Exam = 2, FreqPractice = 1, Learning = 1, Param=0),
-       y = c(Exam = 0, FreqPractice = 0, Learning = -.2, Param=0))
+  list(x = c(Performance = 2, FreqPractice = 1, LearningOpportunities = 1, Param=0),
+       y = c(Performance = 0, FreqPractice = 0, LearningOpportunities = -.2, Param=0))
 plot(dag)
 
 impliedConditionalIndependencies(dag)
 ```
 As we applied within- and between-person randomization of `Param` we have no unobserved confounders under the assumption of interchangeable weeks (within-subject factor steps) and of course sufficency of the randomization.
 
-
-# Surveydata overview
-
-```{r}
-#| eval: false
-#Cronbachs Alpha ## muss noch eleganter
-data_Gew <- data_survey %>% 
-  select(BF_Gew1, BF_Gew2, BF_Gew3) 
-alpha(data_Gew)
-
-data_Ext <- data_survey %>% 
-  select(BF_Ext1, BF_Ext2, BF_Ext3) 
-alpha(data_Ext)
-
-data_Neu <- data_survey %>% 
-  select(BF_Neu1, BF_Neu2, BF_Neu3) 
-alpha(data_Neu)
-
-data_Off <- data_survey %>% 
-  select(BF_Off1, BF_Off2, BF_Off3) 
-alpha(data_Off)
-
-data_Ver <- data_survey %>% 
-  select(BF_Ver1, BF_Ver2, BF_Ver3) 
-alpha(data_Ver)
-
-data_procrastination<- data_survey %>% 
-  select(PC01_01,PC01_02,PC01_03,PC01_04, PC01_05,
-      PC01_06, PC01_07, PC01_08, PC01_09) 
-alpha(data_procrastination)
-
-data_Sellmo_LZ <- data_survey %>% 
-  select(SELLMO_01,SELLMO_05,SELLMO_08, SELLMO_12, SELLMO_16,
-      SELLMO_20, SELLMO_24, SELLMO_28) 
-alpha(data_Sellmo_LZ)
-data_Sellmo_AL <- data_survey %>% 
-  select(SELLMO_02, SELLMO_09, SELLMO_13, SELLMO_17, SELLMO_21,
-      SELLMO_25, SELLMO_29) 
-alpha(data_Sellmo_AL)
-data_Sellmo_VL <- data_survey %>% 
-  select(SELLMO_03, SELLMO_06, SELLMO_10, SELLMO_14, SELLMO_18, 
-      SELLMO_22, SELLMO_26, SELLMO_30) 
-alpha(data_Sellmo_VL)
-data_Sellmo_AV <- data_survey %>% 
-  select(SELLMO_04, SELLMO_07,SELLMO_11, SELLMO_15, SELLMO_19, 
-      SELLMO_23, SELLMO_27, SELLMO_31) 
-alpha(data_Sellmo_AV)
-
-data_nfc <- data_survey %>% 
-  mutate(nfc_01 = 8 - NC01_01,
-    nfc_02 = NC01_02,
-    nfc_03 = NC01_03,
-    nfc_04 = 8 - NC01_04) %>% 
-  select(nfc_01, nfc_02, nfc_03, nfc_04)
-alpha(data_nfc)
-```
 
 # Description of survey sample
 ```{r}
@@ -144,6 +89,16 @@ data_practice_cum <-
   ungroup() %>% 
   full_join(condition_per_PID_and_topic)  %>% # expand to the complete sample
   mutate(practice = ifelse(is.na(practice), 0, practice)) #add zero for people who have never completed tasks
+
+data_practice_sum <- data_practice_cum %>%
+  group_by(PID) %>%
+  summarise(total_practice = sum(practice))
+
+data_practice_sum %>% 
+  ggplot(aes(total_practice)) + 
+  geom_histogram(binwidth = 10) +
+  geom_vline(xintercept = median(data_practice_sum$total_practice), color = "blue", linetype = "dashed") +
+  coord_cartesian(xlim = c(0, 300))
 
 data_practice_cum %>% 
   ggplot(aes(practice)) + 
@@ -196,6 +151,17 @@ data_practice_cum %>%
 ```{r}
 #| cache: true
 
+## Test Nulldmodell 
+poi_t_00 <-
+  brm(
+    practice ~ 1 + (1|PID),
+    family = poisson(),
+    data = data_practice_cum |> 
+      filter(practice != 0),
+    backend = "cmdstanr",
+    cores = 4
+  )
+
 # Poisson with: RI PID
 poi_00 <-
   brm(
@@ -242,9 +208,11 @@ pp_check(poi_02, type = 'ecdf_overlay') +
   ggtitle("poi_02")
 
 
+
 # Model summaries
 modelsummary(
   list(
+    "POI Null"= poi_t_00,
     "POI RiUv" = poi_00,
     "POI RiUvTo" = poi_01,
     "POI RiUvTo RsUv" = poi_02
@@ -259,6 +227,47 @@ modelsummary(
 ## Negative binomial models (discarding the zeros)
 ```{r}
 #| cache: true
+neg_00_null <-
+  brm(
+    bf(
+      practice ~ 1 + (1|PID),
+      shape ~ 1 + (1|PID)
+    ),
+    family = negbinomial(),
+    data = data_practice_cum |> 
+      filter(practice != 0),
+    backend = "cmdstanr",
+   cores = 4
+  )
+
+
+# NegBinom fixed effects model
+neg_00_uv <-
+  brm(
+    bf(
+      practice ~ UV,
+      shape ~ 1 
+    ),
+    family = negbinomial(),
+    data = data_practice_cum |> 
+      filter(practice != 0),
+    backend = "cmdstanr",
+    cores = 4
+  )
+
+# NegBinom with: mu - RI PID
+neg_0 <-
+  brm(
+    bf(
+      practice ~ UV + (1|PID),
+      shape ~ 1
+    ),
+    family = negbinomial(),
+    data = data_practice_cum |> 
+      filter(practice != 0),
+    backend = "cmdstanr",
+    cores = 4
+  )
 
 # NegBinom with: mu - RI PID; phi - RI PID
 neg_00 <-
@@ -330,6 +339,18 @@ neg_04 <-
     cores = 4
   )
 
+neg_05 <-
+  brm(
+    bf(
+      practice ~ UV + (1 + UV|PID) + (UV|Topic),
+      shape ~ 1 + (1 + UV|PID) + (1|Topic)
+    ),
+    family = negbinomial(),
+    data = data_practice_cum |> 
+      filter(practice != 0),
+    backend = "cmdstanr",
+    cores = 4
+  )
 
 # Posterior predictive checks
 pp_check(neg_00, type = 'ecdf_overlay') + 
@@ -351,11 +372,15 @@ pp_check(neg_04, type = 'ecdf_overlay') +
 # Model summaries
 modelsummary(
   list(
+    "NEG UV" = neg_00_uv,
+    "NEG Null" = neg_00_null,
+    "Neg mu: RiPid" = neg_0,
     "NEG mu: RiPid phi: RiPid" = neg_00,
     "NEG mu: RiPidTo phi: RiPid" = neg_01,
     "NEG mu: RiPidTo RsUv phi: RiPid" = neg_02,
     "NEG mu: RiPidTo RsUv phi: RiPidTo" = neg_03,
-    "NEG mu: RiPidTo RsUv phi: RiPidTo RsUv" = neg_04
+    "NEG mu: RiPidTo RsUv phi: RiPidTo RsUv" = neg_04,
+   "NEG mu: RiPid RsUv RSTo phi ohneUV: RiPidTo RsUv" = neg_05
   ),
   statistic = "conf.int"
 )
@@ -380,14 +405,32 @@ zineg_00 <-
     cores = 4
   )
 
+zineg_01 <-
+  brm(
+    bf(
+      practice ~ 1 + UV + (1 + UV|PID),
+      shape ~ 1 + UV + (1|PID),
+      zi ~ 1 + (1|PID)
+    ),
+    family = zero_inflated_negbinomial(),
+    data = data_practice_cum,
+    backend = "cmdstanr",
+    cores = 4
+  )
+
 pp_check(zineg_00, type = 'ecdf_overlay') + 
   coord_cartesian(xlim = c(0, 200)) + 
-  ggtitle("neg_04")
+  ggtitle("zineg_00")
+
+pp_check(zineg_01, type = 'ecdf_overlay') + 
+  coord_cartesian(xlim = c(0, 200)) + 
+  ggtitle("zineg_01")
 
 # Model summaries
 modelsummary(
   list(
-    "ZI NEG mu: RiPidRsUv phi: RiPid zi: RiPid" = zineg_00
+    "ZI NEG mu: RiPidRsUv phi: RiPid zi: RiPid" = zineg_00,
+    "ZI NEG mu: RiPidRsUv phi: RiPid" = zineg_01
   ),
   statistic = "conf.int"
 )
@@ -425,7 +468,8 @@ data_examperformance_and_practice <-
   # Calculate mean value in exam tasks per topic
   ungroup() %>% 
   full_join(data_practice_cum) %>%
-  mutate(performance_score_topic_zo = performance_score_topic / 3)
+  mutate(performance_score_topic_zo = performance_score_topic / 3) %>%
+ filter(Topic != "Quali")
 ```
 
 
@@ -444,8 +488,7 @@ data_examperformance_and_practice %>%
   labs(title = "Scatterplot",
        subtitle = "of Tasks Completed with Performance Score") +
   ylab("Performance Score") +
-  xlab("Tasks Completed")
-
+  xlab("Tasks Completed") 
 
 data_examperformance_and_practice %>% 
   group_by(PID) %>% 
@@ -461,16 +504,80 @@ data_examperformance_and_practice %>%
   ylab("Performance Score") +
   xlab("Tasks Completed (log)")
 
-ggplot(data_examperformance_and_practice %>%
-         filter(Topic != "Quali"),
+ggplot(data_examperformance_and_practice,
        aes(practice, performance_score_topic, color = UV)) + 
   geom_jitter(alpha = .5) +
   facet_wrap(~Topic, scales = "free") +
   coord_cartesian(xlim = c(0,15)) +
   stat_smooth(se = F) +
-  theme_solarized(light = FALSE) +
-  theme(legend.position = "bottom")
+  theme_gray() +
+  theme(legend.position = "bottom")+
+  theme(panel.background = element_rect(fill = "lightgrey"))+
+  theme(strip.text = element_text(size = 12)) +  # Anpassung der Überschriftsgröße
+  theme(axis.text = element_text(size = 12)) +   # Anpassung der Achsentextgröße
+  theme(axis.title = element_text(size = 12)) +  # Anpassung der Achsentitelgröße
+  theme(legend.text = element_text(size = 12)) 
 ```
+
+##Overall testing effect (Bekomme cmdstanr gerad nicht zum Laufen auf meinem Rechner)
+
+```{r}
+
+data_examperformance_and_practice_complete <- data_examperformance_and_practice %>%
+  group_by(PID) %>%
+  summarise(practice_sum = sum(practice, na.rm = TRUE),
+            score_sum = sum(performance_score_topic, na.rm = TRUE)) %>%
+  mutate(performance_score_sum_zo = score_sum / 18, na.rm = TRUE)
+
+
+ggplot(data_examperformance_and_practice_complete, aes(x = score_sum)) +
+  geom_density(fill = "skyblue", color = "black") +
+  labs(title = "Histogramm für score_sum",
+       x = "Punkte quantitative Aufgaben",
+       y = "Dichte")
+
+ggplot(data_examperformance_and_practice_complete, aes(x = practice_sum)) +
+  geom_density(fill = "blue", color = "black") +
+  labs(title = "Histogramm für practice_sum",
+       x = "Übungsaufagben",
+       y = "Dichte")
+
+plot(data_examperformance_and_practice_complete$practice_sum, data_examperformance_and_practice_complete$score_sum, main = "Scatterplot: practice_sum vs. performance_score_topic_zo_mean", xlab = "Summe der Übungsaufgaben", ylab = "Erreichte Punkte")
+
+# Erstmal ganz plump eeil zoib nicht läuft
+lm_model <- lm(score_sum ~ practice_sum, data = data_examperformance_and_practice_complete)
+summary(lm_model)
+
+
+beta_model <- #Geht nicht weil 0 und 1 in dv
+ betareg(formula = performance_score_sum_zo ~ practice_sum,
+  family = beta(), 
+  data = data_examperformance_and_practice_complete )
+
+zoib <- 
+  brm(
+    bf(
+     performance_score_sum_zo ~ practice_sum,
+      phi ~ practice_sum,
+      coi ~ practice_sum,
+      zoi ~ practice_sum
+    ),
+    family = zero_one_inflated_beta(),
+    data = data_examperformance_and_practice_complete,     #ohne Zusatz läuft das nicht durch
+    init = "0",            # was der Zusatz tut weiß ich aber nicht
+    control = list(adapt_delta = 0.91,
+                   max_treedepth = 11),
+    threads = threading(2)
+  ) 
+
+pp_check(zoib)
+pp_check(zoib, type = 'ecdf_overlay')
+conditional_effects(zoib)
+modelsummary(zoib)
+
+
+```
+
 
 ## Descriptive effect sizes per topic
 ```{r}
@@ -657,3 +764,6 @@ ggplot(practice_gains_derivs,
   geom_point() +
   coord_cartesian(xlim = c(0, 200))
 ```
+
+
+
