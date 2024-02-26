@@ -151,27 +151,18 @@ data_practice_cum %>%
 ```{r}
 #| cache: true
 
-## Test Nulldmodell 
-poi_t_00 <-
-  brm(
-    practice ~ 1 + (1|PID),
-    family = poisson(),
-    data = data_practice_cum |> 
-      filter(practice != 0),
-    backend = "cmdstanr",
-    cores = 4
-  )
 
 # Poisson with: RI PID
-poi_00 <-
+poipp_00 <-
   brm(
     practice ~ UV + (1|PID),
     family = poisson(),
     data = data_practice_cum |> 
       filter(practice != 0),
-    backend = "cmdstanr",
+   backend = "cmdstanr",
     cores = 4
   )
+modelsummary(poipp_00)
 
 # Poisson with: RI PID & Topic
 poi_01 <-
@@ -519,7 +510,7 @@ ggplot(data_examperformance_and_practice,
   theme(legend.text = element_text(size = 12)) 
 ```
 
-##Overall testing effect (Bekomme cmdstanr gerad nicht zum Laufen auf meinem Rechner)
+## Testing effect in general
 
 ```{r}
 
@@ -527,7 +518,7 @@ data_examperformance_and_practice_complete <- data_examperformance_and_practice 
   group_by(PID) %>%
   summarise(practice_sum = sum(practice, na.rm = TRUE),
             score_sum = sum(performance_score_topic, na.rm = TRUE)) %>%
-  mutate(performance_score_sum_zo = score_sum / 18, na.rm = TRUE)
+  mutate(performance_score_sum_zo = score_sum / 18)
 
 
 ggplot(data_examperformance_and_practice_complete, aes(x = score_sum)) +
@@ -539,22 +530,13 @@ ggplot(data_examperformance_and_practice_complete, aes(x = score_sum)) +
 ggplot(data_examperformance_and_practice_complete, aes(x = practice_sum)) +
   geom_density(fill = "blue", color = "black") +
   labs(title = "Histogramm für practice_sum",
-       x = "Übungsaufagben",
+       x = "Übungsaufgaben",
        y = "Dichte")
 
 plot(data_examperformance_and_practice_complete$practice_sum, data_examperformance_and_practice_complete$score_sum, main = "Scatterplot: practice_sum vs. performance_score_topic_zo_mean", xlab = "Summe der Übungsaufgaben", ylab = "Erreichte Punkte")
 
-# Erstmal ganz plump eeil zoib nicht läuft
-lm_model <- lm(score_sum ~ practice_sum, data = data_examperformance_and_practice_complete)
-summary(lm_model)
 
-
-beta_model <- #Geht nicht weil 0 und 1 in dv
- betareg(formula = performance_score_sum_zo ~ practice_sum,
-  family = beta(), 
-  data = data_examperformance_and_practice_complete )
-
-zoib <- 
+zoi_te_00 <- 
   brm(
     bf(
      performance_score_sum_zo ~ practice_sum,
@@ -563,18 +545,63 @@ zoib <-
       zoi ~ practice_sum
     ),
     family = zero_one_inflated_beta(),
-    data = data_examperformance_and_practice_complete,     #ohne Zusatz läuft das nicht durch
-    init = "0",            # was der Zusatz tut weiß ich aber nicht
+    data = data_examperformance_and_practice_complete,
+    init = "0",            
+    backend = "cmdstanr",
+        control = list(adapt_delta = 0.91,
+                  max_treedepth = 11),
+    cores = 4
+    ) 
+
+pp_check(zoi_te_00)
+pp_check(zoi_te_00, type = 'ecdf_overlay')
+conditional_effects(zoi_te_00)
+modelsummary(zoi_te_00)
+
+
+zoi_te_01 <- 
+ brm(
+    bf(
+      performance_score_topic_zo ~ practice,
+      phi ~ practice,
+      coi ~ practice,
+      zoi ~ practice
+    ),
+    family = zero_one_inflated_beta(),
+    data = data_examperformance_and_practice,
+    init = "0",
     control = list(adapt_delta = 0.91,
                    max_treedepth = 11),
-    threads = threading(2)
-  ) 
+    backend = "cmdstanr",
+    cores = 4
+  )
 
-pp_check(zoib)
-pp_check(zoib, type = 'ecdf_overlay')
-conditional_effects(zoib)
-modelsummary(zoib)
+pp_check(zoi_te_01)
+pp_check(zoi_te_01, type = 'ecdf_overlay')
+conditional_effects(zoi_te_01)
+modelsummary(list(zoi_te_00,zoi_te_01))
 
+zoi_te_02 <- 
+ brm(
+    bf(
+      performance_score_topic_zo ~ practice + (1|Topic),
+      phi ~ practice + (1|Topic),
+      coi ~ practice + (1|Topic),
+      zoi ~ practice + (1|Topic)
+    ),
+    family = zero_one_inflated_beta(),
+    data = data_examperformance_and_practice,
+    init = "0",
+    control = list(adapt_delta = 0.91,
+                   max_treedepth = 11),
+    backend = "cmdstanr",
+    cores = 4
+  )
+
+pp_check(zoi_te_02)
+pp_check(zoi_te_02, type = 'ecdf_overlay')
+conditional_effects(zoi_te_02)
+modelsummary(list(zoi_te_00,zoi_te_01, zoi_te_02))
 
 ```
 
@@ -590,7 +617,7 @@ data_examperformance_and_practice %>%
             topic = Topic)
 ```
 
-## Zero-one-inflated beta-regression models
+## Zero-one-inflated beta-regression models (ab hier von Samuel)
 ```{r}
 #| cache: true
 
@@ -607,7 +634,6 @@ zoib00 <-
     init = "0",
     control = list(adapt_delta = 0.91,
                    max_treedepth = 11),
-    threads = threading(2),
     backend = "cmdstanr",
     cores = 4
   )
@@ -629,7 +655,6 @@ zoib01 <-
     init = "0",
     control = list(adapt_delta = 0.91,
                    max_treedepth = 11),
-    threads = threading(2),
     backend = "cmdstanr",
     cores = 4
   )
@@ -676,10 +701,47 @@ pp_check(zoib03)
 pp_check(zoib03, type = 'ecdf_overlay')
 conditional_effects(zoib03)
 
+######Wieso taucht hier niemals UV auf????
+zoib04 <- 
+  brm(
+    bf(
+      performance_score_topic_zo ~ practice + (1 + practice|Topic) + (UV|PID),
+      phi ~ practice*Topic + (UV|PID),
+      coi ~ practice*Topic + (UV|PID),
+      zoi ~ practice*Topic + (UV|PID)
+    ),
+    family = zero_one_inflated_beta(),
+    data = data_examperformance_and_practice,
+    init = "0",
+    backend = "cmdstanr",
+    cores = 4
+  )
+
+pp_check(zoib04)
+pp_check(zoib04, type = 'ecdf_overlay')
+conditional_effects(zoib04)
+
+
+zoib05 <- 
+  brm(
+    bf(
+      performance_score_topic_zo ~ practice + (1 + practice|Topic) + (1|PID) + (1|UV),
+      phi ~ practice*Topic + (1|PID) + (1|UV),
+      coi ~ practice*Topic + (1|PID) + (1|UV),
+      zoi ~ practice*Topic + (1|PID) + (1|UV)
+    ),
+    family = zero_one_inflated_beta(),
+    data = data_examperformance_and_practice,
+    init = "0",
+    backend = "cmdstanr",
+    cores = 4
+  )
+
 modelsummary(list(zoib00, 
-                  #zoib01, 
-                  #zoib02, 
-                  zoib03))
+                  zoib01, 
+                  zoib02, 
+                  zoib03,
+                  zoib04, zoib05))
 ```
 
 #### Interpretation of the coefficients
