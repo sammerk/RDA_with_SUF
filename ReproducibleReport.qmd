@@ -11,6 +11,9 @@ format:
     self-contained: true
 editor_options: 
   chunk_output_type: console
+editor: 
+  markdown: 
+    wrap: 72
 ---
 
 # Import scientific use files
@@ -35,6 +38,7 @@ library(tidybayes)
 library(modelr)
 library(ggdist)
 library(cmdstanr)
+library(easystats)
 
 
 
@@ -55,6 +59,7 @@ good_ID_group <-  # List of all participants with UV (group) and informed consen
 ```
 
 # Research questions
+
 ## Assumed causal structure
 
 ```{r}
@@ -69,18 +74,23 @@ plot(dag)
 
 impliedConditionalIndependencies(dag)
 ```
-As we applied within- and between-person randomization of `Param` we have no unobserved confounders under the assumption of interchangeable weeks (within-subject factor steps) and of course sufficency of the randomization.
 
+As we applied within- and between-person randomization of `Param` we
+have no unobserved confounders under the assumption of interchangeable
+weeks (within-subject factor steps) and of course sufficency of the
+randomization.
 
 # Description of survey sample
+
 ```{r}
 #| eval: false
+### Vielleicht doch nur Personen, die auch die Klausur mitgeschrieben haben????
 describe(data_survey$age)
 table(data_survey$gender)
 ```
 
-
 # Practice data overview
+
 ```{r}
 data_practice_cum <- 
   data_practice %>% 
@@ -89,6 +99,7 @@ data_practice_cum <-
   ungroup() %>% 
   full_join(condition_per_PID_and_topic)  %>% # expand to the complete sample
   mutate(practice = ifelse(is.na(practice), 0, practice)) #add zero for people who have never completed tasks
+
 
 data_practice_sum <- data_practice_cum %>%
   group_by(PID) %>%
@@ -114,10 +125,81 @@ data_practice_param <-
   data_practice_cum %>% 
   filter(UV == "repeatable_and_parametrized")
 
+#practice tasks per UV 
+data_UV_task_overview <- data_practice_cum |> 
+  group_by(PID, UV) |> 
+  mutate(sum_UV = sum(practice)) |> 
+  ungroup(UV) |> 
+  mutate(total_sum_UV = sum(sum_UV)/3) |> 
+    mutate(prop_sum_UV = sum_UV / total_sum_UV) |> 
+    mutate (prop_sum_topic = practice / total_sum_UV) |> 
+  ungroup()
+
+
+###Percentage of tasks processed per UV and per topic 
+#Are there major differences between topics?
+ggplot(data_UV_task_overview, aes(x = UV, y = prop_sum_UV, fill = UV)) +
+  geom_boxplot() +
+  labs(x = "UV", y = "Proportion of sum_UV", title = "Proportion of sum_UV per UV") +
+  theme_minimal() +
+  theme(legend.position = "none") 
+
+ggplot(data_UV_task_overview, aes(x = UV, y = sum_UV, fill = UV)) +
+  geom_boxplot() +
+  facet_wrap(~ Topic, ncol = 3) + 
+  labs(x = "UV", y = "sum_UV", title = "sum_UV per topic") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+ggplot(data_UV_task_overview, aes(x = UV, y = prop_sum_UV, fill = UV)) +
+  geom_boxplot() +
+  facet_wrap(~ Topic, ncol = 3) + 
+  labs(x = "UV", y = "Proportion of sum_UV", title = "Proportion of sum_UV per topic") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+ggplot(data_UV_task_overview, aes(x = Topic, y = prop_sum_topic, fill = UV)) +
+  geom_boxplot() +
+  labs(x = "UV", y = "Proportion per topic", title = "Proportion of taks per topic") +
+  theme_minimal() +
+  theme(legend.position = "none") 
+
+#allover topic and UV wise
+
+data_topic_overview <- data_UV_task_overview |> 
+  group_by(Topic, UV) |> 
+  mutate(sum_topic = sum(practice)) |> 
+  select (Topic, sum_topic) |> 
+  distinct()
+
+
+```
+
+# Performance data overview
+
+```{r}
+#| cache: true
+data_examperformance_and_practice <-  
+  data_exam %>% 
+  group_by(PID, Topic) %>% 
+  dplyr::summarize(performance_score_topic = mean(Performance, na.rm = T)) %>%
+  # Calculate mean value in exam tasks per topic
+  ungroup() %>% 
+  full_join(data_practice_cum) %>%
+  mutate(performance_score_topic_zo = performance_score_topic / 3) %>%
+ filter(Topic != "Quali")
+
+data_examperformance_and_practice_complete <- data_examperformance_and_practice %>%
+  group_by(PID) %>%
+  summarise(practice_sum = sum(practice, na.rm = TRUE),
+            score_sum = sum(performance_score_topic, na.rm = TRUE)) %>%
+  mutate(performance_score_sum_zo = score_sum / 18)
 ```
 
 # Modelling effects on practice
+
 ## Graphical overview
+
 ```{r}
 data_practice_cum %>% 
   ggplot(aes(UV, practice)) + 
@@ -134,6 +216,28 @@ data_practice_cum %>%
   labs(title = "Tasks Completed", 
        subtitle = "Zoomed and Complete Data per Experimental Condition") +
   theme(strip.background = element_rect(fill = "#CDCDCD", color = "#11111150"))
+
+#fuer Präsi
+
+data_practice_cum %>% 
+  mutate(UV = ifelse(UV == "repeatable_and_parametrized", 
+                     "Parametrisiert", "Nicht parametrisiert"),
+         `Anzahl gelöster Aufgaben` = practice) %>%
+  ggplot(aes(UV, `Anzahl gelöster Aufgaben`, color = UV)) +
+  geom_jitter(alpha = .2) +
+  facet_zoom(ylim = c(0, 200)) +
+  xlab("") +
+  labs(title = "Überblick Anzahl bearbeiteter Aufgaben", 
+       subtitle = "Gezoomte und vollständige Daten pro experimenteller Bedingung",
+       size = 20) +
+  scale_color_manual(values = c("Parametrisiert" = "#5E813F", "Nicht parametrisiert" = "#4273B1")) + 
+  theme(strip.background = element_rect(fill = "#CDCDCD", color = "#11111150"),
+        legend.position = "none",  # Legende rechts entfernen
+        text = element_text(size = 12)) +  # Schriftgröße anpassen
+  labs(subtitle = "Gezoomte und vollständige Daten pro experimenteller Bedingung", title = "Überblick Anzahl bearbeiteter Aufgaben",  hjust = 0.5)
+
+
+
   
 data_practice_cum %>% 
   ggplot(aes(UV, log(practice))) + 
@@ -148,12 +252,13 @@ data_practice_cum %>%
 ```
 
 ## Poisson models (discarding the zeros)
+
 ```{r}
 #| cache: true
 
 
 # Poisson with: RI PID
-poipp_00 <-
+poi_00 <-
   brm(
     practice ~ UV + (1|PID),
     family = poisson(),
@@ -162,7 +267,7 @@ poipp_00 <-
    backend = "cmdstanr",
     cores = 4
   )
-modelsummary(poipp_00)
+modelsummary(poi_00)
 
 # Poisson with: RI PID & Topic
 poi_01 <-
@@ -185,6 +290,18 @@ poi_02 <-
     backend = "cmdstanr",
     cores = 4
   )
+# Poisson with: RI PID & Topic, RS UV PID & Topic
+poi_03 <-
+  brm(
+    practice ~ UV + (1 + UV|PID) + (1 + UV|Topic),
+    family = poisson(),
+    data = data_practice_cum |> 
+      filter(practice != 0),
+    backend = "cmdstanr",
+    cores = 4
+  )
+## no significant gain of the model and also theoretically rather implausible that there are topic-specific differences
+
 
 
 # Posterior predictive checks
@@ -203,10 +320,10 @@ pp_check(poi_02, type = 'ecdf_overlay') +
 # Model summaries
 modelsummary(
   list(
-    "POI Null"= poi_t_00,
     "POI RiUv" = poi_00,
     "POI RiUvTo" = poi_01,
-    "POI RiUvTo RsUv" = poi_02
+    "POI RiUvTo RsUv" = poi_02, #favored model
+    "POI RIUvTO RsUv ToPID"= poi_03
   ),
   statistic = "conf.int"
 )
@@ -214,52 +331,10 @@ modelsummary(
 
 > Random intercepts and random slope improve model fit substantially
 
-
 ## Negative binomial models (discarding the zeros)
+
 ```{r}
 #| cache: true
-neg_00_null <-
-  brm(
-    bf(
-      practice ~ 1 + (1|PID),
-      shape ~ 1 + (1|PID)
-    ),
-    family = negbinomial(),
-    data = data_practice_cum |> 
-      filter(practice != 0),
-    backend = "cmdstanr",
-   cores = 4
-  )
-
-
-# NegBinom fixed effects model
-neg_00_uv <-
-  brm(
-    bf(
-      practice ~ UV,
-      shape ~ 1 
-    ),
-    family = negbinomial(),
-    data = data_practice_cum |> 
-      filter(practice != 0),
-    backend = "cmdstanr",
-    cores = 4
-  )
-
-# NegBinom with: mu - RI PID
-neg_0 <-
-  brm(
-    bf(
-      practice ~ UV + (1|PID),
-      shape ~ 1
-    ),
-    family = negbinomial(),
-    data = data_practice_cum |> 
-      filter(practice != 0),
-    backend = "cmdstanr",
-    cores = 4
-  )
-
 # NegBinom with: mu - RI PID; phi - RI PID
 neg_00 <-
   brm(
@@ -274,39 +349,11 @@ neg_00 <-
     cores = 4
   )
 
-# NegBinom with: mu - RI PID & Topic; phi - RI PID
+# NegBinom with: mu - RI PID & Topic; phi - RI PID & Topic
 neg_01 <-
   brm(
     bf(
       practice ~ UV + (1|PID) + (1|Topic),
-      shape ~ 1 + (1|PID)
-    ),
-    family = negbinomial(),
-    data = data_practice_cum |> 
-      filter(practice != 0),
-    backend = "cmdstanr",
-    cores = 4
-  )
-
-# NegBinom with: mu - RI PID & Topic, RS UV; phi - RI PID
-neg_02 <-
-  brm(
-    bf(
-      practice ~ UV + (1 + UV|PID) + (1|Topic),
-      shape ~ 1 + (1|PID)
-    ),
-    family = negbinomial(),
-    data = data_practice_cum |> 
-      filter(practice != 0),
-    backend = "cmdstanr",
-    cores = 4
-  )
-
-# NegBinom with: mu - RI PID & Topic, RS UV; phi - RI PID & Topic
-neg_03 <-
-  brm(
-    bf(
-      practice ~ UV + (1 + UV|PID) + (1|Topic),
       shape ~ 1 + (1|PID) + (1|Topic)
     ),
     family = negbinomial(),
@@ -316,12 +363,12 @@ neg_03 <-
     cores = 4
   )
 
-# NegBinom with: mu - RI PID & Topic, RS UV; phi - RI PID & Topic, RS UV
-neg_04 <-
+# NegBinom with: mu - RI PID, RS UV; phi - RI PID
+neg_02 <-
   brm(
     bf(
-      practice ~ UV + (1 + UV|PID) + (1|Topic),
-      shape ~ 1 + (1 + UV|PID) + (1|Topic)
+      practice ~ UV + (1 + UV|PID),
+      shape ~ 1 + (1|PID)
     ),
     family = negbinomial(),
     data = data_practice_cum |> 
@@ -330,11 +377,12 @@ neg_04 <-
     cores = 4
   )
 
-neg_05 <-
+# NegBinom with: mu - RI PID, RS UV; phi - RI PID, RS UV
+neg_03 <-
   brm(
     bf(
-      practice ~ UV + (1 + UV|PID) + (UV|Topic),
-      shape ~ 1 + (1 + UV|PID) + (1|Topic)
+      practice ~ UV + (1 + UV|PID),
+      shape ~ 1 + (1 + UV|PID)
     ),
     family = negbinomial(),
     data = data_practice_cum |> 
@@ -342,11 +390,9 @@ neg_05 <-
     backend = "cmdstanr",
     cores = 4
   )
+
 
 # Posterior predictive checks
-pp_check(neg_00, type = 'ecdf_overlay') + 
-  coord_cartesian(xlim = c(0, 200)) + 
-  ggtitle("neg_00")
 pp_check(neg_01, type = 'ecdf_overlay') + 
   coord_cartesian(xlim = c(0, 200)) + 
   ggtitle("neg_01")
@@ -356,39 +402,37 @@ pp_check(neg_02, type = 'ecdf_overlay') +
 pp_check(neg_03, type = 'ecdf_overlay') + 
   coord_cartesian(xlim = c(0, 200)) + 
   ggtitle("neg_03")
-pp_check(neg_04, type = 'ecdf_overlay') + 
-  coord_cartesian(xlim = c(0, 200)) + 
-  ggtitle("neg_04")
+
 
 # Model summaries
 modelsummary(
-  list(
-    "NEG UV" = neg_00_uv,
-    "NEG Null" = neg_00_null,
-    "Neg mu: RiPid" = neg_0,
-    "NEG mu: RiPid phi: RiPid" = neg_00,
-    "NEG mu: RiPidTo phi: RiPid" = neg_01,
-    "NEG mu: RiPidTo RsUv phi: RiPid" = neg_02,
-    "NEG mu: RiPidTo RsUv phi: RiPidTo" = neg_03,
-    "NEG mu: RiPidTo RsUv phi: RiPidTo RsUv" = neg_04,
-   "NEG mu: RiPid RsUv RSTo phi ohneUV: RiPidTo RsUv" = neg_05
+  list("NEG mu: RiPID  phi: RiPid" = neg_00, 
+       "NEG mu: RiPidTo phi: RiPid" = neg_01, # random intercept for topic not relevant for shape (phi) or mu
+    "NEG mu: RiPid RsUv phi: RiPid" = neg_02, # favored model
+   "NEG mu: RiPid RsUv phi: RiPid RsUv" = neg_03   # no further improvements through random slope for shape (phi)
   ),
   statistic = "conf.int"
 )
 ```
 
-> Random intercepts for $\mu$ and $\phi$ over `UV` improve model fit substantially, also random slopes for $\mu$ over `UV`. Random intercepts over `Topic` seem not that necessary for $\mu$ and also for $\phi$. Hence we go for Zero-Inflated Negative Binomials with Random Intercepts over UV for $\mu$
+> Random intercepts for $\mu$ and $\phi$ over `UV` improve model fit
+> substantially, also random slopes for $\mu$ over `UV`. Random
+> intercepts over `Topic` seem not that necessary for $\mu$ and also for
+> $\phi$. Hence we go for Zero-Inflated Negative Binomials with Random
+> Intercepts over UV for $\mu$ and $\phi$ and also random slopes for
+> $\mu$ over `UV`
 
-## Zero-inflated models 
+## Zero-inflated models
+
 ```{r}
 #| cache: true
 # Zero-Inflated NegBinom with: mu - RI PID, RS UV; phi - RI PID; zi - RI PID
 zineg_00 <-
   brm(
     bf(
-      practice ~ 1 + UV + (1 + UV|PID),
-      shape ~ 1 + UV + (1|PID),
-      zi ~ 1 + UV + (1|PID)
+      practice ~ UV + (1 + UV|PID),
+      shape ~ UV + (1|PID),
+      zi ~ UV + (1|PID)
     ),
     family = zero_inflated_negbinomial(),
     data = data_practice_cum,
@@ -399,15 +443,16 @@ zineg_00 <-
 zineg_01 <-
   brm(
     bf(
-      practice ~ 1 + UV + (1 + UV|PID),
-      shape ~ 1 + UV + (1|PID),
-      zi ~ 1 + (1|PID)
+      practice ~  UV + (1 + UV|PID),
+      shape ~  UV + (1 + UV|PID),
+      zi ~ UV + (1 + UV|PID)
     ),
     family = zero_inflated_negbinomial(),
     data = data_practice_cum,
     backend = "cmdstanr",
     cores = 4
   )
+
 
 pp_check(zineg_00, type = 'ecdf_overlay') + 
   coord_cartesian(xlim = c(0, 200)) + 
@@ -420,13 +465,16 @@ pp_check(zineg_01, type = 'ecdf_overlay') +
 # Model summaries
 modelsummary(
   list(
-    "ZI NEG mu: RiPidRsUv phi: RiPid zi: RiPid" = zineg_00,
-    "ZI NEG mu: RiPidRsUv phi: RiPid" = zineg_01
+    "ZI NEG mu: RiPidRsUv phi: RiPid zi: RiPid" = zineg_00,  # favored model
+    "ZI NEG mu: RiPidRsUv phi: RiPidRsUv zi: RiPidRsUv" = zineg_01
+    
   ),
   statistic = "conf.int"
 )
-```
 
+report <- report(zineg_00)
+report[[1]] 
+```
 
 ## Testing effects of the zero-inflated negativ binomial models
 
@@ -434,39 +482,29 @@ The fixed part of the model without zero inflation can be described as
 $$\operatorname{count}_i \sim \operatorname{NegativeBinomial}\left(\mu_i, \phi\right)$$
 $$\log \left(\mu_i\right)=\beta_0+\beta_1 \operatorname{UV}_i$$
 
-$$\log \left(\phi_i\right)=\beta_3+\beta_4 \operatorname{UV}_i$$
-where $\mu$ is the mean and $\phi$ the precision parameter of the negative binomial distribution. As $UV_i$ is a dummy coded indicator variable $log(\mu_i)$ equals $\beta_0$ for the reference group and $\beta_0 + \beta_1$ for the other group. This implies that the difference between the two expected numbers of tasks worked out in the two groups are $|e^{\beta_0 + \beta_1} - e^{\beta_0}|$.
-The `{brms}`-package can estimate the uncertainty of this difference, too: 
+$$\log \left(\phi_i\right)=\beta_3+\beta_4 \operatorname{UV}_i$$ where
+$\mu$ is the mean and $\phi$ the precision parameter of the negative
+binomial distribution. As $UV_i$ is a dummy coded indicator variable
+$log(\mu_i)$ equals $\beta_0$ for the reference group and
+$\beta_0 + \beta_1$ for the other group. This implies that the
+difference between the two expected numbers of tasks worked out in the
+two groups are $|e^{\beta_0 + \beta_1} - e^{\beta_0}|$. The
+`{brms}`-package can estimate the uncertainty of this difference, too:
 
 ```{r}
 hypothesis(zineg_00, 'exp(Intercept + UVrepeatable_and_parametrized) - exp(Intercept)= 0')
 ```
 
 ## Plotting the conditional effects
+
 ```{r}
 conditional_effects(zineg_00)
 ```
 
+# Modelling effects on performance
 
-
-# Performance data overview
-```{r}
-#| cache: true
-data_examperformance_and_practice <-  
-  data_exam %>% 
-  group_by(PID, Topic) %>% 
-  dplyr::summarize(performance_score_topic = mean(Performance, na.rm = T)) %>%
-  # Calculate mean value in exam tasks per topic
-  ungroup() %>% 
-  full_join(data_practice_cum) %>%
-  mutate(performance_score_topic_zo = performance_score_topic / 3) %>%
- filter(Topic != "Quali")
-```
-
-
-
-# Effects on performance
 ## Graphical Overview
+
 ```{r}
 #| cache: true
 data_examperformance_and_practice %>% 
@@ -495,118 +533,80 @@ data_examperformance_and_practice %>%
   ylab("Performance Score") +
   xlab("Tasks Completed (log)")
 
+#Fuer Praesi
+data_examperformance_and_practice %>%
+  group_by(PID) %>%
+  summarize(sum_score = sum(performance_score_topic, na.rm = TRUE),
+            sum_practice = sum(practice, na.rm = TRUE)) %>% # Gesamtanzahl an Übungen und Summe der Punkte in der Prüfung
+  ggplot(aes(log(sum_practice), sum_score)) +
+  geom_jitter(color = "#111111", alpha = 0.3) +
+  hrbrthemes::theme_ipsum(axis_title_size = 18) +  # Anpassung der Achsenbeschriftung innerhalb von theme_ipsum()
+  labs(
+       caption = "Halbe Punkte zeigen null bearbeitete Aufgaben an") +
+  ylab("Punktezahl im Test") +
+  xlab("Anzahl bearbeiteter Aufgaben (log)")
+
+
 ggplot(data_examperformance_and_practice,
        aes(practice, performance_score_topic, color = UV)) + 
   geom_jitter(alpha = .5) +
   facet_wrap(~Topic, scales = "free") +
-  coord_cartesian(xlim = c(0,15)) +
+  coord_cartesian(xlim = c(0,60)) +
   stat_smooth(se = F) +
-  theme_gray() +
+  theme() +
   theme(legend.position = "bottom")+
   theme(panel.background = element_rect(fill = "lightgrey"))+
   theme(strip.text = element_text(size = 12)) +  # Anpassung der Überschriftsgröße
   theme(axis.text = element_text(size = 12)) +   # Anpassung der Achsentextgröße
   theme(axis.title = element_text(size = 12)) +  # Anpassung der Achsentitelgröße
   theme(legend.text = element_text(size = 12)) 
-```
-
-## Testing effect in general
-
-```{r}
-
-data_examperformance_and_practice_complete <- data_examperformance_and_practice %>%
-  group_by(PID) %>%
-  summarise(practice_sum = sum(practice, na.rm = TRUE),
-            score_sum = sum(performance_score_topic, na.rm = TRUE)) %>%
-  mutate(performance_score_sum_zo = score_sum / 18)
 
 
-ggplot(data_examperformance_and_practice_complete, aes(x = score_sum)) +
-  geom_density(fill = "skyblue", color = "black") +
-  labs(title = "Histogramm für score_sum",
-       x = "Punkte quantitative Aufgaben",
-       y = "Dichte")
+#Fuer Praesi
+library(forcats)
 
-ggplot(data_examperformance_and_practice_complete, aes(x = practice_sum)) +
-  geom_density(fill = "blue", color = "black") +
-  labs(title = "Histogramm für practice_sum",
-       x = "Übungsaufgaben",
-       y = "Dichte")
+data_examperformance_and_practice$Topic <- fct_recode(data_examperformance_and_practice$Topic,
+                                                      "Methodologie" = "Methodology",
+                                                      "Messtheorie" = "Measurement Theory",
+                                                      "Verteilungen" = "Distribution",
+                                                      "Kreuztabellen" = "Cross Table",
+                                                      "Korrelationen" = "Correlation",
+                                                      "Mittelwertsunterschiede" = "Mean Difference")
 
-plot(data_examperformance_and_practice_complete$practice_sum, data_examperformance_and_practice_complete$score_sum, main = "Scatterplot: practice_sum vs. performance_score_topic_zo_mean", xlab = "Summe der Übungsaufgaben", ylab = "Erreichte Punkte")
+data_examperformance_and_practice$Topic <- fct_relevel(data_examperformance_and_practice$Topic,
+                                                       'Methodologie', 'Messtheorie', 'Verteilungen', 'Kreuztabellen', 'Korrelationen', 'Mittelwertsunterschiede')
 
-
-zoi_te_00 <- 
-  brm(
-    bf(
-     performance_score_sum_zo ~ practice_sum,
-      phi ~ practice_sum,
-      coi ~ practice_sum,
-      zoi ~ practice_sum
-    ),
-    family = zero_one_inflated_beta(),
-    data = data_examperformance_and_practice_complete,
-    init = "0",            
-    backend = "cmdstanr",
-        control = list(adapt_delta = 0.91,
-                  max_treedepth = 11),
-    cores = 4
-    ) 
-
-pp_check(zoi_te_00)
-pp_check(zoi_te_00, type = 'ecdf_overlay')
-conditional_effects(zoi_te_00)
-modelsummary(zoi_te_00)
+data_examperformance_and_practice$UV <- fct_recode(data_examperformance_and_practice$UV,
+                                                   "Nicht parametrisiert" = "repeatable_and_notparametrized",
+                                                   "Parametrisiert" = "repeatable_and_parametrized")
 
 
-zoi_te_01 <- 
- brm(
-    bf(
-      performance_score_topic_zo ~ practice,
-      phi ~ practice,
-      coi ~ practice,
-      zoi ~ practice
-    ),
-    family = zero_one_inflated_beta(),
-    data = data_examperformance_and_practice,
-    init = "0",
-    control = list(adapt_delta = 0.91,
-                   max_treedepth = 11),
-    backend = "cmdstanr",
-    cores = 4
-  )
+ggplot(data_examperformance_and_practice,
+       aes(x = practice, y = performance_score_topic, color = UV)) + 
+  geom_jitter(alpha = .3) + 
+  facet_wrap(~Topic, scales = "free") +
+  coord_cartesian(xlim = c(0,100)) +
+  stat_smooth(se = F) +
+  theme_minimal() +  # Änderung zu einem minimalen Thema für eine saubere Ästhetik
+  theme(
+    legend.position = "right",
+    panel.background = element_rect(fill = "#f0f0f0"),
+    strip.background = element_rect(fill = "lightgrey"),
+    strip.text = element_text(size = 12),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14),  # Etwas größere Schrift für Achsentitel
+    legend.background = element_rect(fill = "#f0f0f0"),
+    legend.text = element_text(size = 12)
+  ) +
+  xlab("Anzahl gelöster Übungsaufgaben") +  # Neue x-Achsenbeschriftung
+  ylab("Punkte im Test") +  # Neue y-Achsenbeschriftung
+  scale_color_manual(values = c("#4273B1", "#5E813F"))
 
-pp_check(zoi_te_01)
-pp_check(zoi_te_01, type = 'ecdf_overlay')
-conditional_effects(zoi_te_01)
-modelsummary(list(zoi_te_00,zoi_te_01))
-
-zoi_te_02 <- 
- brm(
-    bf(
-      performance_score_topic_zo ~ practice + (1|Topic),
-      phi ~ practice + (1|Topic),
-      coi ~ practice + (1|Topic),
-      zoi ~ practice + (1|Topic)
-    ),
-    family = zero_one_inflated_beta(),
-    data = data_examperformance_and_practice,
-    init = "0",
-    control = list(adapt_delta = 0.91,
-                   max_treedepth = 11),
-    backend = "cmdstanr",
-    cores = 4
-  )
-
-pp_check(zoi_te_02)
-pp_check(zoi_te_02, type = 'ecdf_overlay')
-conditional_effects(zoi_te_02)
-modelsummary(list(zoi_te_00,zoi_te_01, zoi_te_02))
 
 ```
-
 
 ## Descriptive effect sizes per topic
+
 ```{r}
 data_examperformance_and_practice %>% 
   group_by(Topic) %>% 
@@ -617,11 +617,45 @@ data_examperformance_and_practice %>%
             topic = Topic)
 ```
 
-## Zero-one-inflated beta-regression models (ab hier von Samuel)
+## Testing Hypothesis 1 (Zero-one-inflated beta-regression models)
+
 ```{r}
 #| cache: true
 
-zoib00 <- 
+# no 1 inflation in summed data
+ggplot(data_examperformance_and_practice_complete, aes(x = performance_score_sum_zo)) +
+  geom_density(fill = "skyblue", color = "black") +
+  labs(title = "Histogram for score_sum",
+       x = "proportion of correct tasks",
+       y = "density")
+
+zib_sum_00 <- 
+  brm(
+    bf(
+     performance_score_sum_zo ~ practice_sum,
+      phi ~ practice_sum,
+      zi ~ practice_sum
+    ),
+    family = zero_inflated_beta(),
+    data = data_examperformance_and_practice_complete,
+    init = "0",            
+    backend = "cmdstanr",
+    cores = 4
+    ) 
+
+# Several checks of model and visualization of effects
+pp_check(zib_sum_00)
+pp_check(zib_sum_00, type = 'ecdf_overlay')
+conditional_effects(zib_sum_00)
+modelsummary(zib_sum_00)
+
+plot_model(zib_sum_00, type = "est")
+plot_model(zib_sum_00, type = "emm", terms = "practice_sum")
+report <- report(zib_sum_00)
+report[[1]] 
+
+
+zoib01 <- 
   brm(
     bf(
       performance_score_topic_zo ~ practice + (1|Topic) + (1|PID),
@@ -638,38 +672,33 @@ zoib00 <-
     cores = 4
   )
 
-pp_check(zoib00)
-pp_check(zoib00, type = 'ecdf_overlay')
-conditional_effects(zoib00)
-
-zoib01 <- 
-  brm(
-    bf(
-      performance_score_topic_zo ~ practice + (1|Topic) + (1 + practice|PID),
-      phi ~ practice + (1|Topic) + (1 + practice|PID),
-      coi ~ practice + (1|Topic) + (1 + practice|PID),
-      zoi ~ practice + (1|Topic) + (1 + practice|PID)
-    ),
-    family = zero_one_inflated_beta(),
-    data = data_examperformance_and_practice,
-    init = "0",
-    control = list(adapt_delta = 0.91,
-                   max_treedepth = 11),
-    backend = "cmdstanr",
-    cores = 4
-  )
-
 pp_check(zoib01)
 pp_check(zoib01, type = 'ecdf_overlay')
 conditional_effects(zoib01)
+modelsummary(zoib01)
+report <- report(zoib01)
+report[[1]] 
 
+#creating conditional effects object
+c_eff_zoib01 <- conditional_effects(zoib01, continious = T)
+
+#creating plot
+plot_Hyp1 <- plot(c_eff_zoib01, plot = FALSE)[[1]] + theme(text = element_text(size = 16))+ 
+  xlab ("Number of solved tasks") + ylab("Performance")
+
+plot_Hyp1
+```
+
+## Testing Hypothesis 3 (ZOIB)
+
+```{r}
 zoib02 <- 
   brm(
     bf(
-      performance_score_topic_zo ~ practice + (1 + practice|Topic) + (1|PID),
-      phi ~ practice + (1 + practice|Topic) + (1|PID),
-      coi ~ practice + (1 + practice|Topic) + (1|PID),
-      zoi ~ practice + (1 + practice|Topic) + (1|PID)
+      performance_score_topic_zo ~ UV ,
+      phi ~ UV ,
+      coi ~ UV ,
+      zoi ~ UV
     ),
     family = zero_one_inflated_beta(),
     data = data_examperformance_and_practice,
@@ -681,14 +710,20 @@ zoib02 <-
 pp_check(zoib02)
 pp_check(zoib02, type = 'ecdf_overlay')
 conditional_effects(zoib02)
+modelsummary(zoib02)
+
+hypothesis(zoib02, 'exp(Intercept + UVParametrisiert) - exp(Intercept)= 0') ###funktioniert das genauso für ZOIB wie oben für ZINEG)
+
+report <- report(zoib02)
+report[[1]] 
 
 zoib03 <- 
   brm(
     bf(
-      performance_score_topic_zo ~ practice + (1 + practice|Topic) + (1|PID),
-      phi ~ practice*Topic + (1|PID),
-      coi ~ practice*Topic + (1|PID),
-      zoi ~ practice*Topic + (1|PID)
+      performance_score_topic_zo ~ UV + (1|Topic),
+      phi ~ UV + (1|Topic),
+      coi ~ UV + (1|Topic),
+      zoi ~ UV + (1|Topic)
     ),
     family = zero_one_inflated_beta(),
     data = data_examperformance_and_practice,
@@ -700,15 +735,16 @@ zoib03 <-
 pp_check(zoib03)
 pp_check(zoib03, type = 'ecdf_overlay')
 conditional_effects(zoib03)
+modelsummary(zoib03)
 
-######Wieso taucht hier niemals UV auf????
+
 zoib04 <- 
   brm(
     bf(
-      performance_score_topic_zo ~ practice + (1 + practice|Topic) + (UV|PID),
-      phi ~ practice*Topic + (UV|PID),
-      coi ~ practice*Topic + (UV|PID),
-      zoi ~ practice*Topic + (UV|PID)
+      performance_score_topic_zo ~ UV + (1|Topic) + (1|PID),
+      phi ~ UV + (1|Topic) + (1|PID),
+      coi ~ UV + (1|Topic) + (1|PID),
+      zoi ~ UV + (1|Topic) + (1|PID)
     ),
     family = zero_one_inflated_beta(),
     data = data_examperformance_and_practice,
@@ -720,15 +756,36 @@ zoib04 <-
 pp_check(zoib04)
 pp_check(zoib04, type = 'ecdf_overlay')
 conditional_effects(zoib04)
+modelsummary(list(zoib03,zoib04))
 
+
+test <- conditional_effects(zoib04, effects = "UV")
+print(test)
+test[["UV"]][["lower__"]]
+test[["UV"]][["upper__"]]
+
+
+test_df <- as.data.frame(test)
+
+# Print the data frame to see its structure
+print(test_df)
+test_values <- ce_df$CI[grepl("UV", test_df$effect)]
+print(test_values)
+
+test[[1]] +
+theme_minimal() +
+labs(title = "Supertitel")
+
+report2 <- report(zoib04)
+report2[[1]] 
 
 zoib05 <- 
   brm(
     bf(
-      performance_score_topic_zo ~ practice + (1 + practice|Topic) + (1|PID) + (1|UV),
-      phi ~ practice*Topic + (1|PID) + (1|UV),
-      coi ~ practice*Topic + (1|PID) + (1|UV),
-      zoi ~ practice*Topic + (1|PID) + (1|UV)
+      performance_score_topic_zo ~ UV + (1|Topic) + (UV|PID),
+      phi ~ UV + (1|Topic) + (UV|PID),
+      coi ~ UV + (1|Topic) + (UV|PID),
+      zoi ~ UV + (1|Topic) + (UV|PID)
     ),
     family = zero_one_inflated_beta(),
     data = data_examperformance_and_practice,
@@ -737,44 +794,66 @@ zoib05 <-
     cores = 4
   )
 
-modelsummary(list(zoib00, 
-                  zoib01, 
-                  zoib02, 
-                  zoib03,
-                  zoib04, zoib05))
+zoib06 <- 
+  brm(
+    bf(
+      performance_score_topic_zo ~ UV + (UV|Topic) + (UV|PID),
+      phi ~ UV + (UV|Topic) + (UV|PID),
+      coi ~ UV + (UV|Topic) + (UV|PID),
+      zoi ~ UV + (UV|Topic) + (UV|PID)
+    ),
+    family = zero_one_inflated_beta(),
+    data = data_examperformance_and_practice,
+    init = "0",
+    backend = "cmdstanr",
+    cores = 4
+  )
+
+
+modelsummary(list("fixed effect" = zoib02,
+                  "random effects" = zoib04 #favored model
+                  ))
 ```
 
 #### Interpretation of the coefficients
-The density of the Beta family for $y \in(0,1)$ is given by
-$$
+
+The density of the Beta family for $y \in(0,1)$ is given by $$
 f(y)=\frac{y^{\mu \phi-1}(1-y)^{(1-\mu) \phi-1}}{B(\mu \phi,(1-\mu) \phi)}
-$$
-where $B$ is the beta function, $\mu$ is the mean parameter and $\phi$ is a positive precision parameter.
-The density of a zero-one-inflated family is given by
-$$
+$$ where $B$ is the beta function, $\mu$ is the mean parameter and
+$\phi$ is a positive precision parameter. The density of a
+zero-one-inflated family is given by $$
 \begin{gathered}
 f_{\alpha, \gamma}(y)=\alpha(1-\gamma) \quad \text { if } y=0 \\
 f_{\alpha, \gamma}(y)=\alpha \gamma \quad \text { if } y=1 \\
 f_{\alpha, \gamma}(y)=(1-\alpha) f(y) \quad \text { if } y \notin\{0,1\}
 \end{gathered}
-$$
-This means $\alpha$ is the Probability of 0 or 1 which is abbreviated in brms with `zoi` (zero or one inflation) and $\gamma$ the probability of 1 conditional to zero or one which is abbreviated in brms with `coi` (conditional one inflation). Hence
+$$ This means $\alpha$ is the Probability of 0 or 1 which is abbreviated
+in brms with `zoi` (zero or one inflation) and $\gamma$ the probability
+of 1 conditional to zero or one which is abbreviated in brms with `coi`
+(conditional one inflation). Hence
 
 $$
 \text{Total Score } =\alpha \gamma+(1-\alpha) \mu
 $$
 
-For $\phi$ a log-link is used, for all other parameters a logit-link function. This means one have to backtransform the coefficients from the model `zoib_00` to get $\alpha$, $\gamma$, $\mu$ and $\phi$ for specific values of `practice` and then use them to calculate the Total Score, the Probability of 0 and 1.
-
+For $\phi$ a log-link is used, for all other parameters a logit-link
+function. This means one have to backtransform the coefficients from the
+model `zoib_00` to get $\alpha$, $\gamma$, $\mu$ and $\phi$ for specific
+values of `practice` and then use them to calculate the Total Score, the
+Probability of 0 and 1.
 
 #### Predicted total scores for 1 to 50 tasks
+
 First we extract the parameters in a tidy form.
+
 ```{r}
 tidy_param_zoib00 <- tidy(zoib00)
 tidy_param_zoib00
 ```
 
-Then we define a function which fetches the corresponding parameters from the tidy parameter table and calculates first $\alpha$, $\gamma$, $\mu$ and then the total score $\alpha \gamma + (1 - \alpha) \mu$.  
+Then we define a function which fetches the corresponding parameters
+from the tidy parameter table and calculates first $\alpha$, $\gamma$,
+$\mu$ and then the total score $\alpha \gamma + (1 - \alpha) \mu$.
 
 ```{r}
 total_score_zoib00 <- function(n){
@@ -805,6 +884,7 @@ total_score_zoib00 <- function(n){
 ```
 
 #### Calculate total score gains and their derivation per nth-task
+
 ```{r}
 practice_gains_derivs <- 
   tibble(
@@ -827,5 +907,72 @@ ggplot(practice_gains_derivs,
   coord_cartesian(xlim = c(0, 200))
 ```
 
+#### Effect of parametrisation on performance
+
+```{r}
+zoib01_uv <- 
+  brm(
+    bf(
+      performance_score_topic_zo ~ UV + (1|Topic) + (1|PID),
+      phi ~ UV + (1|Topic) + (1|PID),
+      coi ~ UV + (1|Topic) + (1|PID),
+      zoi ~ UV + (1|Topic) + (1|PID)
+    ),
+    family = zero_one_inflated_beta(),
+    data = data_examperformance_and_practice,
+    init = "0",
+    control = list(adapt_delta = 0.91,
+                   max_treedepth = 11),
+    backend = "cmdstanr",
+    cores = 4
+  )
+
+zoib0X2 <- 
+  brm(
+    bf(
+      performance_score_topic_zo ~ UV ,
+      phi ~ UV ,
+      coi ~ UV ,
+      zoi ~ UV
+    ),
+    family = zero_one_inflated_beta(),
+    data = data_examperformance_and_practice,
+    init = "0",
+    control = list(adapt_delta = 0.91,
+                   max_treedepth = 11),
+    backend = "cmdstanr",
+    cores = 4
+  )
+
+plot(zoib0X)
+conditional_effects(zoib0X)
+summary(zoib0X)
+modelsummary(list(zoib0X,
+                  zoib0X2))
+
+#creating conditional effects object
+c_eff <- conditional_effects(zoib0X, continious = T)
+
+#creating plot
+plot_Hyp3 <- plot(c_eff, plot = FALSE)[[1]] + 
+  scale_color_manual(values = c("repeatable_and_notparametrized" = "green", "repeatable_and_parametrized" = "red"))+
+    theme(text = element_text(size = 18))+
+  scale_y_continuous(limits = c(0, 1))+
+  scale_x_discrete(labels = c("Nicht parametrisiert", "Parametrisiert"))+ 
+  ylab("Anteil gelöster Aufgaben im Test")
 
 
+plot_Hyp3
+
+
+Hyp2 <-conditional_effects(zineg_00, continious = T)
+
+plot_Hyp2 <- plot(Hyp2, plot = FALSE)[[1]] + 
+    theme(text = element_text(size = 18))+
+  scale_y_continuous(limits = c(0, 35))+
+  scale_x_discrete(labels = c("Nicht parametrisiert", "Parametrisiert"))+ 
+  ylab("Anzahl gelöster Übungsaufgaben")
+
+plot_Hyp2
+
+```
