@@ -39,6 +39,8 @@ library(modelr)
 library(ggdist)
 library(cmdstanr)
 library(easystats)
+library(rstan)
+library(StanHeaders)
 
 
 
@@ -87,6 +89,9 @@ randomization.
 ### Vielleicht doch nur Personen, die auch die Klausur mitgeschrieben haben????
 describe(data_survey$age)
 table(data_survey$gender)
+
+length(unique(data_exam$PID)) |> View()
+
 ```
 
 # Practice data overview
@@ -196,7 +201,7 @@ data_examperformance_and_practice_complete <- data_examperformance_and_practice 
   mutate(performance_score_sum_zo = score_sum / 18)
 ```
 
-# Modelling effects on practice
+# Modelling effects on practice (Hyp 2)
 
 ## Graphical overview
 
@@ -413,6 +418,14 @@ modelsummary(
   ),
   statistic = "conf.int"
 )
+
+neg_00_criterion <- add_criterion(neg_00, c("loo", "waic"))
+neg_01_criterion <- add_criterion(neg_01, c("loo", "waic"))
+neg_02_criterion <- add_criterion(neg_02, c("loo", "waic"))
+neg_03_criterion <- add_criterion(neg_03, c("loo", "waic"))
+
+comparison <- loo_compare(neg_00_criterion, neg_01_criterion, neg_02_criterion, neg_03_criterion, criterion="loo") 
+print(comparison)
 ```
 
 > Random intercepts for $\mu$ and $\phi$ over `UV` improve model fit
@@ -501,7 +514,7 @@ hypothesis(zineg_00, 'exp(Intercept + UVrepeatable_and_parametrized) - exp(Inter
 conditional_effects(zineg_00)
 ```
 
-# Modelling effects on performance
+# Modelling effects on performance (Hyp 1 & 3)
 
 ## Graphical Overview
 
@@ -849,6 +862,8 @@ First we extract the parameters in a tidy form.
 ```{r}
 tidy_param_zoib00 <- tidy(zoib00)
 tidy_param_zoib00
+modelsummary(zoib00)
+pp_check(zoib00)
 ```
 
 Then we define a function which fetches the corresponding parameters
@@ -910,7 +925,7 @@ ggplot(practice_gains_derivs,
 #### Effect of parametrisation on performance
 
 ```{r}
-zoib01_uv <- 
+zoib0X <- 
   brm(
     bf(
       performance_score_topic_zo ~ UV + (1|Topic) + (1|PID),
@@ -925,7 +940,7 @@ zoib01_uv <-
                    max_treedepth = 11),
     backend = "cmdstanr",
     cores = 4
-  )
+  ) #favored model'
 
 zoib0X2 <- 
   brm(
@@ -974,5 +989,255 @@ plot_Hyp2 <- plot(Hyp2, plot = FALSE)[[1]] +
   ylab("Anzahl gelöster Übungsaufgaben")
 
 plot_Hyp2
+
+```
+
+# Plots for Paper
+
+```{r}
+main_plot <- data_practice_cum %>% 
+  mutate(UV = ifelse(UV == "repeatable_and_parametrized", 
+                     "Parametrized", "Non-Parametrized"),
+         `Number of Solved Tasks` = practice) %>%
+  ggplot(aes(UV, `Number of Solved Tasks`, color = UV)) +
+  geom_jitter(alpha = .2) +
+facet_zoom(ylim = c(0, 200), zoom.size = 1, show.area = TRUE)+
+  xlab("")  +
+  scale_color_manual(values = c("Parametrized" = "#5E813F", "Non-Parametrized" = "#4273B1")) + 
+  theme(
+    strip.background = element_rect(fill = "#CDCDCD", color = "#11111150"),
+    legend.position = "none",
+    text = element_text(size = 12),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12) 
+  )
+
+# Titelzeile mit zwei Textplots (leere Plots mit Text)
+title_left <- ggplot() + 
+  theme_void() +
+  annotate("text", x = 0.5, y = 0.5, label = "Zoomed View", size = 5) +
+  xlim(0, 1) + ylim(0, 1)
+
+title_right <- ggplot() + 
+  theme_void() +
+  annotate("text", x = 0.5, y = 0.5, label = "Complete View", size = 5) +
+  xlim(0, 1) + ylim(0, 1)
+
+(title_left + title_right) / main_plot +
+  plot_layout(heights = c(0.08, 1)) 
+
+```
+
+```{r}
+#Hyp 2
+
+# 1. Conditional Effects berechnen
+effects_data <- conditional_effects(zineg_00)
+df_pred <- effects_data[[1]] %>%
+  rename(
+    UV_factor = effect1__,
+    estimate = estimate__,
+    lower = lower__,
+    upper = upper__
+  ) %>%
+  mutate(
+    UV_factor = recode(UV_factor,
+      "repeatable_and_parametrized" = "Parametrized",
+      "repeatable_and_notparametrized" = "Non-Parametrized"
+    )
+  )
+
+# 2. Rohdaten aus dem Modellobjekt extrahieren
+raw_data <- model.frame(zineg_00)
+
+df_points <- raw_data %>%
+  mutate(
+    UV_factor = recode(UV,
+      "repeatable_and_parametrized" = "Parametrized",
+      "repeatable_and_notparametrized" = "Non-Parametrized"
+    )
+  )
+
+# 3. Plot kombinieren: Rohdaten + Effekte
+plot1a <- ggplot() +
+  # Rohdatenpunkte
+  geom_jitter(
+    data = df_points,
+    aes(x = UV_factor, y = practice, color = UV_factor),
+    alpha = 0.1,
+    width = 0.2,
+    size = 2
+  ) +
+  # Vorhersagepunkte + Konfidenzintervall
+  geom_point(
+    data = df_pred,
+    aes(x = UV_factor, y = estimate, color = UV_factor),
+    size = 3
+  ) +
+  geom_errorbar(
+    data = df_pred,
+    aes(x = UV_factor, ymin = lower, ymax = upper, color = UV_factor),
+    width = 0.1
+  ) +
+  # Farbcodierung
+  scale_color_manual(values = c(
+    "Non-Parametrized" = "#4273B1",
+    "Parametrized" = "#5E813F"
+  )) +
+  coord_cartesian(ylim = c(0, 50)) +
+  labs(
+    x = NULL,
+    y = "Number of Cpmpleted Tasks",
+    color = NULL
+  ) +
+theme_minimal() +
+theme(
+  legend.position = "none",  # 👈 entfernt die Legende
+  panel.background = element_rect(fill = "#f0f0f0", color = NA),
+  axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+  axis.text.y = element_text(size = 11),
+  axis.title.y = element_text(size = 14)
+)
+
+# 4. Plot anzeigen
+print(plot1a)
+
+
+```
+
+```{r}
+#Hyp 3
+
+# 1. Conditional Effects berechnen
+c_eff2 <- conditional_effects(zoib0X)
+
+df_pred2 <- c_eff2[[1]] %>%
+  rename(
+    UV_factor2 = effect1__,
+    estimate2 = estimate__,
+    lower2 = lower__,
+    upper2 = upper__
+  ) %>%
+  mutate(
+    UV_factor2 = recode(UV_factor2,
+      "repeatable_and_parametrized" = "Parametrized",
+      "repeatable_and_notparametrized" = "Non-Parametrized"
+    )
+  )
+
+# 2. Rohdaten aus dem Modell extrahieren
+raw_data2 <- model.frame(zoib0X)
+
+df_points2 <- raw_data2 %>%
+  mutate(
+    UV_factor2 = recode(UV,
+      "repeatable_and_parametrized" = "Parametrized",
+      "repeatable_and_notparametrized" = "Non-Parametrized"
+    )
+  )
+
+# 3. Plot kombinieren: Rohdaten + Modellvorhersagen
+plot_Hyp3 <- ggplot() +
+  # Rohdatenpunkte
+  geom_jitter(
+    data = df_points2,
+    aes(x = UV_factor2, y = performance_score_topic_zo, color = UV_factor2),
+    alpha = 0.1,
+    width = 0.2,
+    size = 2
+  ) +
+  # Modellschätzungen
+  geom_point(
+    data = df_pred2,
+    aes(x = UV_factor2, y = estimate2, color = UV_factor2),
+    size = 3
+  ) +
+  geom_errorbar(
+    data = df_pred2,
+    aes(x = UV_factor2, ymin = lower2, ymax = upper2, color = UV_factor2),
+    width = 0.1
+  ) +
+  # Farbgebung Blau/Grün
+  scale_color_manual(values = c(
+    "Non-Parametrized" = "#4273B1",
+    "Parametrized" = "#5E813F"
+  )) +
+  scale_y_continuous(limits = c(0, 1)) +
+  labs(
+    x = NULL,
+    y = "Proportion of Correct Responses",
+    color = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    text = element_text(size = 12),
+    legend.position = "none",
+    panel.background = element_rect(fill = "#f0f0f0", color = NA),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.text.y = element_text(size = 11),
+    axis.title.y = element_text(size = 14)
+  )
+
+# 4. Plot anzeigen
+print(plot_Hyp3)
+
+```
+
+```{r}
+#hyp 1
+
+# 1. Conditional effects berechnen
+c_eff_zoib01 <- conditional_effects(zoib01)
+
+# 2. Modellvorhersage-Daten vorbereiten
+df_pred_zoib01 <- c_eff_zoib01[[1]] %>%
+  rename(
+    practice_pred = effect1__,
+    estimate = estimate__,
+    lower = lower__,
+    upper = upper__
+  )
+
+# 3. Rohdaten aus dem Modell extrahieren
+df_points_zoib01 <- model.frame(zoib01)
+
+# 4. Plot erstellen
+plot_Hyp1 <- ggplot() +
+  # Rohdatenpunkte
+  geom_jitter(
+    data = df_points_zoib01,
+    aes(x = practice, y = performance_score_topic_zo),
+    alpha = 0.1,
+    width = 0.3,
+    size = 1.5
+  ) +
+  # Modellvorhersage (Linie + CI-Band)
+  geom_line(
+    data = df_pred_zoib01,
+    aes(x = practice_pred, y = estimate),
+    linewidth = 1.2,
+    color = "#4273B1"
+  ) +
+  geom_ribbon(
+    data = df_pred_zoib01,
+    aes(x = practice_pred, ymin = lower, ymax = upper),
+    fill = "#4273B1",
+    alpha = 0.2
+  ) +
+  scale_y_continuous(limits = c(0, 1)) +
+  theme_minimal() +
+  labs(
+    x = "Number of Completed Tasks",
+    y = "Performance"
+  ) +
+  theme(
+    text = element_text(size = 16),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(size = 14)
+  )+
+ coord_cartesian(xlim = c(0, 200), ylim = c(0.4, 0.9))
+
+# 5. Plot anzeigen
+print(plot_Hyp1)
 
 ```
