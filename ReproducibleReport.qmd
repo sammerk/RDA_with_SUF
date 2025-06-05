@@ -1086,17 +1086,19 @@ plot1a <- ggplot() +
   coord_cartesian(ylim = c(0, 50)) +
   labs(
     x = NULL,
-    y = "Number of Cpmpleted Tasks",
+    y = "Number of Completed Tasks",
     color = NULL
   ) +
-theme_minimal() +
-theme(
-  legend.position = "none",  # 👈 entfernt die Legende
-  panel.background = element_rect(fill = "#f0f0f0", color = NA),
-  axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
-  axis.text.y = element_text(size = 11),
-  axis.title.y = element_text(size = 14)
-)
+  theme_minimal() +
+  theme(
+    text = element_text(size = 12),
+    legend.position = "none",
+    panel.background = element_rect(fill = "#f0f0f0", color = NA),
+    axis.text.x = element_text(hjust = 0.5, size = 13),
+    axis.text.y = element_text(size = 11),
+    axis.title.y = element_text(size = 13)
+  )
+
 
 # 4. Plot anzeigen
 print(plot1a)
@@ -1172,9 +1174,9 @@ plot_Hyp3 <- ggplot() +
     text = element_text(size = 12),
     legend.position = "none",
     panel.background = element_rect(fill = "#f0f0f0", color = NA),
-    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.text.x = element_text(hjust = 0.5, size = 13),
     axis.text.y = element_text(size = 11),
-    axis.title.y = element_text(size = 14)
+    axis.title.y = element_text(size = 13)
   )
 
 # 4. Plot anzeigen
